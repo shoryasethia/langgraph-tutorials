@@ -1,3 +1,7 @@
 typing
 langgraph
 ipython
+langchain
+langchain-core
+google-generativeai
+langchain-google-genai

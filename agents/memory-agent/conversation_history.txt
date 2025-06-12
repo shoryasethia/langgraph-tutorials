@@ -1,0 +1,138 @@
+You: Hi, I am Shorya
+AI: Hello Shorya! Nice to meet you.
+
+I'm an AI assistant. How can I help you today?
+You: Hmm, I am learning langgraph, using gemini as an LLM client, how can i add an systemt prompt to it?
+AI: That's a great question, and it's a common pattern when building agents with LangGraph!
+
+When using Gemini via LangChain (which LangGraph leverages), you add a system prompt by including a `SystemMessage` object at the beginning of the list of messages you pass to the LLM.
+
+Here's how you can do it within a LangGraph node:
+
+### Core Concept: The `SystemMessage`
+
+LangChain's message types (which Gemini understands) include:
+*   `HumanMessage`: For user input.
+*   `AIMessage`: For AI responses.
+*   `SystemMessage`: For instructions, persona, or context that guides the AI's behavior.
+
+You pass a list of these messages to your LLM. The `SystemMessage` should typically be the first message in the list.
+
+### Example Implementation
+
+Let's set up a simple LangGraph with a node that calls Gemini and adds a system prompt.
+
+First, make sure you have the necessary libraries installed:
+```bash
+pip install -U langgraph langchain_google_genai langchain
+```
+
+And set your Google API key:
+```python
+import os
+os.environ["GOOGLE_API_KEY"] = "YOUR_GEMINI_API_KEY"
+```
+
+Now, the LangGraph code:
+
+```python
+from typing import TypedDict, List
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.graph import StateGraph, END
+
+# 1. Define the Graph State
+# This defines what data will flow through your graph.
+# We need a list of messages to maintain conversation history.
+class AgentState(TypedDict):
+    messages: List[BaseMessage]
+
+# 2. Initialize your LLM
+llm = ChatGoogleGenerativeAI(model="gemini-pro")
+
+# 3. Define the System Prompt
+# This is the instruction you want to give to Gemini.
+SYSTEM_PROMPT_TEXT = "You are a helpful and very concise assistant. Always provide short answers, preferably one sentence."
+
+# 4. Define the LLM Node Function
+# This function will be a node in your LangGraph.
+# It takes the current state, adds the system prompt, calls the LLM, and returns the AI's response.
+def call_llm(state: AgentState) -> dict:
+    print("---CALLING LLM NODE---")
+    messages = state['messages']
+
+    # Prepend the SystemMessage to the list of messages
+    # This is the key step!
+    messages_with_system_prompt = [SystemMessage(content=SYSTEM_PROMPT_TEXT)] + messages
+
+    # Invoke the LLM with the combined messages
+    response = llm.invoke(messages_with_system_prompt)
+
+    # Return the AI's response to update the state
+    return {"messages": [response]}
+
+# 5. Build the LangGraph
+workflow = StateGraph(AgentState)
+
+# Add the LLM node
+workflow.add_node("llm_node", call_llm)
+
+# Set the entry point of the graph
+workflow.set_entry_point("llm_node")
+
+# Define the edge from the LLM node to the end of the graph
+workflow.add_edge("llm_node", END)
+
+# Compile the graph
+app = workflow.compile()
+
+# 6. Run the Graph
+print("\n---RUN 1: Normal Question---")
+inputs1 = {"messages": [HumanMessage(content="What is the capital of France?")]}
+for s in app.stream(inputs1):
+    print(s)
+# Expected: "Paris." (or similar concise answer due to system prompt)
+
+print("\n---RUN 2: Question where conciseness matters---")
+inputs2 = {"messages": [HumanMessage(content="Tell me about the history of the internet.")]}
+for s in app.stream(inputs2):
+    print(s)
+# Expected: A very short summary, not a long paragraph, due to the system prompt.
+```
+
+### Explanation of the Key Part:
+
+```python
+    messages = state['messages']
+    # Prepend the SystemMessage to the list of messages
+    messages_with_system_prompt = [SystemMessage(content=SYSTEM_PROMPT_TEXT)] + messages
+    response = llm.invoke(messages_with_system_prompt)
+```
+
+1.  We retrieve the existing `messages` from the current `state`. These `messages` typically contain the `HumanMessage` from the user and any previous `AIMessage`s if it's a multi-turn conversation.
+2.  We create a `SystemMessage` instance using our defined `SYSTEM_PROMPT_TEXT`.
+3.  We then *prepend* this `SystemMessage` to the `messages` list using `[SystemMessage(...)] + messages`. This ensures the system instruction is the very first thing Gemini "sees" when processing the prompt.
+4.  Finally, `llm.invoke()` is called with this new list of messages, incorporating the system prompt.
+
+### Advanced Considerations:
+
+*   **Dynamic System Prompts:** If your system prompt needs to change based on the user's intent or previous turns, you could store the system prompt text in your `AgentState` and modify it with a preceding node.
+    ```python
+    class AgentState(TypedDict):
+        messages: List[BaseMessage]
+        system_prompt: str # Add this
+
+    # In your initial state:
+    initial_state = {"messages": [HumanMessage(content="What is the capital of France?")], "system_prompt": "You are a helpful assistant."}
+
+    # In your call_llm node:
+    def call_llm(state: AgentState) -> dict:
+        messages = state['messages']
+        current_system_prompt = state.get('system_prompt', "You are a general AI assistant.") # Fallback
+        messages_with_system_prompt = [SystemMessage(content=current_system_prompt)] + messages
+        # ... rest of the code
+    ```
+*   **Multiple LLM Nodes:** If you have different LLM nodes for different tasks within your graph, each can have its own specific system prompt tailored to its function.
+*   **LangChain Expression Language (LCEL):** For more complex prompt engineering (e.g., using `ChatPromptTemplate` with variables), you can compose your prompt chain using LCEL before passing it to the LLM. However, for just adding a static system prompt, the direct `SystemMessage` approach is often sufficient and clear.
+
+This method gives you precise control over the initial instructions given to your Gemini model within your LangGraph application.
