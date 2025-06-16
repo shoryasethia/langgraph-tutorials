@@ -5,3 +5,6 @@ langchain
 langchain-core
 google-generativeai
 langchain-google-genai
+langchain_chroma
+langchain_community
+pypdf
